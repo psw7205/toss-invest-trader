@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+dist/
+build/
+*.egg-info/
+
+# Secrets and local runtime
+.env
+.env.*
+!.env.example
+*.log
+.cache/
+
+# Generated external API documents
+docs/openapi/tossinvest-openapi.json

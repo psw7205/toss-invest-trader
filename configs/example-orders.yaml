@@ -1,0 +1,10 @@
+# Human planning aid only. The CLI does not execute this file yet.
+# Keep proposed orders reviewable before wiring automation.
+orders:
+  - symbol: AAPL
+    side: BUY
+    orderType: LIMIT
+    timeInForce: DAY
+    quantity: "1"
+    price: "180.00"
+    clientOrderId: manual-aapl-001
