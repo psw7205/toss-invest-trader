@@ -20,6 +20,7 @@
 ```bash
 uv sync --group dev
 cp .env.example .env
+chmod 600 .env
 # edit .env on the server
 ```
 
@@ -120,22 +121,24 @@ uv run tosstrader cancel <order-id>
 uv run tosstrader cancel <order-id> --execute --i-understand-real-order
 ```
 
-## OpenAPI snapshot
+## OpenAPI contract check
 
-Toss OpenAPI JSON은 로컬 검증용으로만 내려받고 커밋하지 않습니다.
+Toss OpenAPI JSON은 수동 refresh 때만 `.cache/`에 내려받고 커밋하지 않습니다.
 
 ```bash
 uv run python scripts/update_openapi_spec.py
-uv run pytest tests/test_openapi_contract.py
+uv run pytest -m contract_live
 ```
 
-`tests/test_openapi_contract.py`는 JSON 파일이 없으면 자동으로 내려받습니다. 스펙 변경으로 테스트가 실패하면 이 프로젝트가 쓰는 endpoint/schema/auth/account header에 영향이 있는지 확인하고 client/test를 함께 갱신합니다.
+`tests/test_openapi_contract.py`는 live OpenAPI 문서를 메모리로 내려받아 검증하고, repo에 JSON을 쓰지 않습니다. 기본 `uv run pytest`에서는 외부 네트워크가 필요한 contract test를 제외합니다. 스펙 변경으로 contract test가 실패하면 이 프로젝트가 쓰는 endpoint/schema/auth/account header에 영향이 있는지 확인하고 client/test를 함께 갱신합니다.
 
 ## Development
 
 ```bash
 uv run pytest
 uv run ruff check .
+uv run ruff format --check .
+uv run mypy .
 uv run tosstrader --help
 ```
 

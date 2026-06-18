@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import importlib.util
-import json
+from functools import cache
 from pathlib import Path
 
-SPEC_PATH = Path("docs/openapi/tossinvest-openapi.json")
+import pytest
+
 SCRIPT_PATH = Path("scripts/update_openapi_spec.py")
+pytestmark = pytest.mark.contract_live
 
 
 def download_spec() -> dict:
@@ -14,13 +16,12 @@ def download_spec() -> dict:
         raise RuntimeError(f"could not load {SCRIPT_PATH}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.download_spec(output=SPEC_PATH)
+    return module.fetch_spec()
 
 
+@cache
 def load_spec() -> dict:
-    if not SPEC_PATH.exists():
-        download_spec()
-    return json.loads(SPEC_PATH.read_text(encoding="utf-8"))
+    return download_spec()
 
 
 def test_openapi_snapshot_is_present() -> None:

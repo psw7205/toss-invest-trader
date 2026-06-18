@@ -12,8 +12,10 @@ build/
 .env
 .env.*
 !.env.example
+.envrc
 *.log
 .cache/
+configs/*.local.yaml
 
 # Generated external API documents
 docs/openapi/tossinvest-openapi.json

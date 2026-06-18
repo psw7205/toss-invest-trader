@@ -4,20 +4,28 @@ import argparse
 import json
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 SPEC_URL = "https://openapi.tossinvest.com/openapi-docs/latest/openapi.json"
-DEFAULT_OUTPUT = Path("docs/openapi/tossinvest-openapi.json")
+DEFAULT_OUTPUT = Path(".cache/toss-invest-trader/tossinvest-openapi.json")
 
 
-def download_spec(*, url: str = SPEC_URL, output: Path = DEFAULT_OUTPUT) -> dict:
+def fetch_spec(*, url: str = SPEC_URL) -> dict[str, Any]:
     with urllib.request.urlopen(url, timeout=30) as response:
-        spec = json.load(response)
+        return json.load(response)
 
+
+def write_spec(spec: dict[str, Any], *, output: Path = DEFAULT_OUTPUT) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
         json.dumps(spec, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+
+def download_spec(*, url: str = SPEC_URL, output: Path = DEFAULT_OUTPUT) -> dict[str, Any]:
+    spec = fetch_spec(url=url)
+    write_spec(spec, output=output)
     return spec
 
 

@@ -39,4 +39,4 @@ Trading safety choices in this project:
    - `--i-understand-real-order`
 4. `clientOrderId` is required for live orders unless `--generate-client-order-id` is used.
 5. Secrets are intentionally absent. Fill `.env` directly on the server.
-6. OpenAPI JSON is snapshotted in `docs/openapi/tossinvest-openapi.json`; update with `uv run python scripts/update_openapi_spec.py` and verify contract tests when upstream changes.
+6. OpenAPI JSON is cached locally in `.cache/toss-invest-trader/tossinvest-openapi.json`; update with `uv run python scripts/update_openapi_spec.py` and verify contract tests when upstream changes.

@@ -14,6 +14,7 @@ Report privately through a direct, non-public channel to the project owner.
 
 - Never commit `.env` files or real Toss Securities credentials.
 - `TOSSINVEST_CLIENT_ID` and `TOSSINVEST_CLIENT_SECRET` must stay server-local.
+- Keep server-local `.env` files readable only by the runtime user, for example `chmod 600 .env`.
 - Rotate credentials immediately if they are printed in logs, committed, or shared outside the intended server.
 
 ## Trading safety

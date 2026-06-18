@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from typing import Any, Protocol
 
@@ -18,7 +19,9 @@ def main(argv: list[str] | None = None) -> int:
     except (RuntimeError, ValueError, TossInvestError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         if isinstance(exc, TossInvestError) and exc.payload is not None:
-            print(json.dumps(exc.payload, ensure_ascii=False, indent=2), file=sys.stderr)
+            payload = _safe_api_error_payload(exc.payload)
+            if payload is not None:
+                print(json.dumps(payload, ensure_ascii=False, indent=2), file=sys.stderr)
         return 1
 
 
@@ -156,7 +159,6 @@ def cmd_sellable(args: argparse.Namespace) -> int:
 
 
 def cmd_order(args: argparse.Namespace) -> int:
-    settings = _settings(args)
     client_order_id = args.client_order_id
     if args.generate_client_order_id:
         client_order_id = generated_client_order_id()
@@ -174,6 +176,7 @@ def cmd_order(args: argparse.Namespace) -> int:
     payload = draft.to_api_payload()
     if not args.execute:
         return _print_json({"dryRun": True, "wouldSubmit": payload})
+    settings = _settings(args)
     _guard_live_order(settings, args.i_understand_real_order, payload)
     with TossInvestClient(settings) as client:
         account = _resolve_account(args, client)
@@ -181,9 +184,9 @@ def cmd_order(args: argparse.Namespace) -> int:
 
 
 def cmd_cancel(args: argparse.Namespace) -> int:
-    settings = _settings(args)
     if not args.execute:
         return _print_json({"dryRun": True, "wouldCancelOrderId": args.order_id})
+    settings = _settings(args)
     _guard_live_order(settings, args.i_understand_real_order, {"orderId": args.order_id})
     with TossInvestClient(settings) as client:
         account = _resolve_account(args, client)
@@ -197,6 +200,36 @@ def _guard_live_order(settings: Any, acknowledged: bool, payload: dict[str, obje
         raise RuntimeError("live submission requires --i-understand-real-order")
     if "clientOrderId" not in payload and "orderId" not in payload:
         raise RuntimeError("live order requires --client-order-id or --generate-client-order-id")
+
+
+def _safe_api_error_payload(payload: Any) -> Any:
+    if os.environ.get("TOSSINVEST_DEBUG_API_ERRORS") == "1":
+        return _redact_sensitive(payload)
+    if not isinstance(payload, dict):
+        return None
+    summary_keys = ("errorCode", "code", "error", "message")
+    summary = {
+        key: _redact_sensitive(payload[key])
+        for key in summary_keys
+        if key in payload and not _is_sensitive_key(key)
+    }
+    return summary or None
+
+
+def _redact_sensitive(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: "[redacted]" if _is_sensitive_key(key) else _redact_sensitive(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_sensitive(item) for item in value]
+    return value
+
+
+def _is_sensitive_key(key: object) -> bool:
+    normalized = str(key).lower()
+    return any(part in normalized for part in ("secret", "token", "authorization", "account"))
 
 
 if __name__ == "__main__":

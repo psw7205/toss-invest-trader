@@ -7,6 +7,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 DEFAULT_BASE_URL = "https://openapi.tossinvest.com"
+ALLOW_CUSTOM_BASE_URL_ENV = "TOSSINVEST_ALLOW_CUSTOM_BASE_URL"
 
 
 @dataclass(frozen=True)
@@ -23,7 +24,7 @@ class Settings:
 
 def load_settings(env_file: str | Path | None = None) -> Settings:
     if env_file is not None:
-        load_dotenv(env_file)
+        load_dotenv(env_file, override=True)
     else:
         load_dotenv()
 
@@ -39,9 +40,16 @@ def load_settings(env_file: str | Path | None = None) -> Settings:
     if trading_mode not in {"paper", "live"}:
         raise RuntimeError("TOSSINVEST_TRADING_MODE must be either 'paper' or 'live'.")
 
+    base_url = os.environ.get("TOSSINVEST_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
+    if base_url != DEFAULT_BASE_URL:
+        if os.environ.get(ALLOW_CUSTOM_BASE_URL_ENV) != "1":
+            raise RuntimeError(f"custom TOSSINVEST_BASE_URL requires {ALLOW_CUSTOM_BASE_URL_ENV}=1")
+        if not base_url.startswith("https://"):
+            raise RuntimeError("custom TOSSINVEST_BASE_URL must use https://")
+
     return Settings(
         client_id=client_id,
         client_secret=client_secret,
-        base_url=os.environ.get("TOSSINVEST_BASE_URL", DEFAULT_BASE_URL).rstrip("/"),
+        base_url=base_url,
         trading_mode=trading_mode,
     )
