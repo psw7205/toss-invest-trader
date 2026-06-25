@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from toss_invest_trader.models import OrderDraft, generated_client_order_id
+from toss_invest_trader.models import (
+    OrderDraft,
+    generated_client_order_id,
+    preflight_cancel_order,
+    preflight_create_order,
+)
 
 
 def test_limit_order_payload() -> None:
@@ -62,8 +67,19 @@ def test_amount_based_order_is_buy_market_only() -> None:
         ).to_api_payload()
 
 
-@pytest.mark.parametrize("quantity", ["1.5", "1e2", "+1", "0", "-1"])
-def test_quantity_must_match_openapi_integer_pattern(quantity: str) -> None:
+def test_quantity_accepts_openapi_decimal_pattern() -> None:
+    payload = OrderDraft(
+        symbol="AAPL",
+        side="BUY",
+        order_type="MARKET",
+        quantity="1.5",
+    ).to_api_payload()
+
+    assert payload["quantity"] == "1.5"
+
+
+@pytest.mark.parametrize("quantity", ["1e2", "+1", "0", "-1", "1.", ".1"])
+def test_quantity_must_match_openapi_decimal_pattern(quantity: str) -> None:
     with pytest.raises(ValueError, match="quantity"):
         OrderDraft(
             symbol="AAPL",
@@ -112,3 +128,61 @@ def test_generated_client_order_id_matches_openapi_pattern() -> None:
         ).to_api_payload()["clientOrderId"]
         == value
     )
+
+
+def test_create_order_preflight_requires_idempotency_for_live() -> None:
+    preflight = preflight_create_order(
+        payload={
+            "symbol": "AAPL",
+            "side": "BUY",
+            "orderType": "MARKET",
+            "quantity": "1",
+            "confirmHighValueOrder": False,
+        },
+        execution_mode="live",
+        live_trading_enabled=True,
+        real_order_acknowledged=True,
+    )
+
+    assert preflight.passed is False
+    assert preflight.checks["idempotency"] == {
+        "clientOrderIdRequired": True,
+        "clientOrderIdPresent": False,
+    }
+    assert preflight.errors == (
+        "live order requires --client-order-id or --generate-client-order-id",
+    )
+
+
+def test_create_order_preflight_reports_high_value_confirmation() -> None:
+    preflight = preflight_create_order(
+        payload={
+            "symbol": "AAPL",
+            "side": "BUY",
+            "orderType": "MARKET",
+            "quantity": "1",
+            "clientOrderId": "manual-aapl-001",
+            "confirmHighValueOrder": True,
+        },
+        execution_mode="dry-run",
+        live_trading_enabled=False,
+        real_order_acknowledged=False,
+    )
+
+    assert preflight.passed is True
+    assert preflight.checks["risk"] == {
+        "highValueConfirmationAcknowledged": True,
+    }
+
+
+def test_cancel_order_preflight_reports_cancel_operation() -> None:
+    preflight = preflight_cancel_order(
+        order_id="order-123",
+        execution_mode="dry-run",
+        live_trading_enabled=False,
+        real_order_acknowledged=False,
+    )
+
+    assert preflight.to_dict()["operation"] == "cancelOrder"
+    assert preflight.to_dict()["endpoint"] == "/api/v1/orders/order-123/cancel"
+    assert preflight.passed is True

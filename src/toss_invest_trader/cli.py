@@ -8,7 +8,12 @@ from typing import Any, Protocol
 
 from toss_invest_trader.client import TossInvestClient, TossInvestError
 from toss_invest_trader.config import load_settings
-from toss_invest_trader.models import OrderDraft, generated_client_order_id
+from toss_invest_trader.models import (
+    OrderDraft,
+    generated_client_order_id,
+    preflight_cancel_order,
+    preflight_create_order,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -35,12 +40,37 @@ def build_parser() -> argparse.ArgumentParser:
     prices = _add_simple(sub, "prices", "Get current prices", cmd_prices)
     prices.add_argument("symbols", nargs="+", help="Symbols such as 005930 AAPL")
 
+    quote = _add_simple(sub, "quote", "Get a current quote for one symbol", cmd_quote)
+    quote.add_argument("symbol", help="Symbol such as 005930 or AAPL")
+
+    candles = _add_simple(sub, "candles", "Get candles for one symbol", cmd_candles)
+    candles.add_argument("symbol", help="Symbol such as 005930 or AAPL")
+    candles.add_argument("--interval", choices=["1m", "1d"], required=True)
+    candles.add_argument("--count", type=int, default=100)
+    candles.add_argument("--before", help="ISO date-time cursor")
+    candles_adjusted = candles.add_mutually_exclusive_group()
+    candles_adjusted.add_argument("--adjusted", dest="adjusted", action="store_true", default=True)
+    candles_adjusted.add_argument("--raw", dest="adjusted", action="store_false")
+
+    price_limits = _add_simple(sub, "price-limits", "Get daily price limits", cmd_price_limits)
+    price_limits.add_argument("symbol", help="Symbol such as 005930 or AAPL")
+
+    market_calendar = _add_simple(
+        sub, "market-calendar", "Get KR or US market calendar", cmd_market_calendar
+    )
+    market_calendar.add_argument("market", choices=["KR", "US"])
+    market_calendar.add_argument("--date", help="Calendar date as YYYY-MM-DD")
+
     holdings = _add_accounted(sub, "holdings", "Get holdings", cmd_holdings)
     holdings.add_argument("--symbol")
 
     orders = _add_accounted(sub, "orders", "List orders", cmd_orders)
     orders.add_argument("--status", choices=["OPEN", "CLOSED"], default="OPEN")
     orders.add_argument("--symbol")
+    orders.add_argument("--from-date")
+    orders.add_argument("--to-date")
+    orders.add_argument("--cursor")
+    orders.add_argument("--limit", type=int)
 
     buying = _add_accounted(sub, "buying-power", "Get cash buying power", cmd_buying_power)
     buying.add_argument("--currency", choices=["KRW", "USD"], required=True)
@@ -130,6 +160,38 @@ def cmd_prices(args: argparse.Namespace) -> int:
         return _print_json(client.prices(args.symbols))
 
 
+def cmd_quote(args: argparse.Namespace) -> int:
+    settings = _settings(args)
+    with TossInvestClient(settings) as client:
+        return _print_json(client.quote(args.symbol))
+
+
+def cmd_candles(args: argparse.Namespace) -> int:
+    settings = _settings(args)
+    with TossInvestClient(settings) as client:
+        return _print_json(
+            client.candles(
+                args.symbol,
+                args.interval,
+                count=args.count,
+                before=args.before,
+                adjusted=args.adjusted,
+            )
+        )
+
+
+def cmd_price_limits(args: argparse.Namespace) -> int:
+    settings = _settings(args)
+    with TossInvestClient(settings) as client:
+        return _print_json(client.price_limits(args.symbol))
+
+
+def cmd_market_calendar(args: argparse.Namespace) -> int:
+    settings = _settings(args)
+    with TossInvestClient(settings) as client:
+        return _print_json(client.market_calendar(args.market, date=args.date))
+
+
 def cmd_holdings(args: argparse.Namespace) -> int:
     settings = _settings(args)
     with TossInvestClient(settings) as client:
@@ -141,7 +203,17 @@ def cmd_orders(args: argparse.Namespace) -> int:
     settings = _settings(args)
     with TossInvestClient(settings) as client:
         account = _resolve_account(args, client)
-        return _print_json(client.orders(account=account, status=args.status, symbol=args.symbol))
+        return _print_json(
+            client.orders(
+                account=account,
+                status=args.status,
+                symbol=args.symbol,
+                from_date=args.from_date,
+                to_date=args.to_date,
+                cursor=args.cursor,
+                limit=args.limit,
+            )
+        )
 
 
 def cmd_buying_power(args: argparse.Namespace) -> int:
@@ -174,32 +246,70 @@ def cmd_order(args: argparse.Namespace) -> int:
         confirm_high_value_order=args.confirm_high_value_order,
     )
     payload = draft.to_api_payload()
+    preflight = preflight_create_order(
+        payload=payload,
+        execution_mode="dry-run",
+        live_trading_enabled=False,
+        real_order_acknowledged=args.i_understand_real_order,
+    )
     if not args.execute:
-        return _print_json({"dryRun": True, "wouldSubmit": payload})
+        return _print_json(_dry_run_payload(preflight.to_dict(), would_submit=payload))
     settings = _settings(args)
-    _guard_live_order(settings, args.i_understand_real_order, payload)
+    preflight = preflight_create_order(
+        payload=payload,
+        execution_mode="live",
+        live_trading_enabled=settings.live_trading_enabled,
+        real_order_acknowledged=args.i_understand_real_order,
+    )
+    preflight.raise_for_errors()
     with TossInvestClient(settings) as client:
         account = _resolve_account(args, client)
         return _print_json(client.create_order(account=account, payload=payload))
 
 
 def cmd_cancel(args: argparse.Namespace) -> int:
+    preflight = preflight_cancel_order(
+        order_id=args.order_id,
+        execution_mode="dry-run",
+        live_trading_enabled=False,
+        real_order_acknowledged=args.i_understand_real_order,
+    )
     if not args.execute:
-        return _print_json({"dryRun": True, "wouldCancelOrderId": args.order_id})
+        return _print_json(
+            _dry_run_payload(preflight.to_dict(), would_cancel_order_id=args.order_id)
+        )
     settings = _settings(args)
-    _guard_live_order(settings, args.i_understand_real_order, {"orderId": args.order_id})
+    preflight = preflight_cancel_order(
+        order_id=args.order_id,
+        execution_mode="live",
+        live_trading_enabled=settings.live_trading_enabled,
+        real_order_acknowledged=args.i_understand_real_order,
+    )
+    preflight.raise_for_errors()
     with TossInvestClient(settings) as client:
         account = _resolve_account(args, client)
         return _print_json(client.cancel_order(account=account, order_id=args.order_id))
 
 
-def _guard_live_order(settings: Any, acknowledged: bool, payload: dict[str, object]) -> None:
-    if not settings.live_trading_enabled:
-        raise RuntimeError("live submission requires TOSSINVEST_TRADING_MODE=live")
-    if not acknowledged:
-        raise RuntimeError("live submission requires --i-understand-real-order")
-    if "clientOrderId" not in payload and "orderId" not in payload:
-        raise RuntimeError("live order requires --client-order-id or --generate-client-order-id")
+def _dry_run_payload(
+    preflight: dict[str, object],
+    *,
+    would_submit: dict[str, object] | None = None,
+    would_cancel_order_id: str | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "dryRun": True,
+        "operation": preflight["operation"],
+        "method": preflight["method"],
+        "endpoint": preflight["endpoint"],
+        "executionMode": preflight["executionMode"],
+        "preflight": preflight,
+    }
+    if would_submit is not None:
+        payload["wouldSubmit"] = would_submit
+    if would_cancel_order_id is not None:
+        payload["wouldCancelOrderId"] = would_cancel_order_id
+    return payload
 
 
 def _safe_api_error_payload(payload: Any) -> Any:

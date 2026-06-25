@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 
 import pytest
 
@@ -85,6 +86,9 @@ def test_order_command_is_dry_run_by_default(capsys: pytest.CaptureFixture[str])
     assert rc == 0
     out = capsys.readouterr().out
     assert '"dryRun": true' in out
+    assert '"operation": "createOrder"' in out
+    assert '"endpoint": "/api/v1/orders"' in out
+    assert '"preflight"' in out
     assert '"clientOrderId": "manual-aapl-001"' in out
 
 
@@ -109,7 +113,9 @@ def test_order_dry_run_does_not_require_credentials(
     )
 
     assert rc == 0
-    assert '"dryRun": true' in capsys.readouterr().out
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["dryRun"] is True
+    assert payload["preflight"]["checks"]["idempotency"]["clientOrderIdPresent"] is False
 
 
 def test_cancel_command_is_dry_run_by_default(capsys: pytest.CaptureFixture[str]) -> None:
@@ -118,7 +124,140 @@ def test_cancel_command_is_dry_run_by_default(capsys: pytest.CaptureFixture[str]
     assert rc == 0
     out = capsys.readouterr().out
     assert '"dryRun": true' in out
+    assert '"operation": "cancelOrder"' in out
+    assert '"endpoint": "/api/v1/orders/order-123/cancel"' in out
     assert '"wouldCancelOrderId": "order-123"' in out
+
+
+def test_read_only_market_data_commands_use_client(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls: list[tuple[str, object]] = []
+
+    class MarketDataClient:
+        def __init__(self, *_: object, **__: object) -> None:
+            pass
+
+        def __enter__(self) -> MarketDataClient:
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            pass
+
+        def quote(self, symbol: str) -> object:
+            calls.append(("quote", symbol))
+            return {"symbol": symbol}
+
+        def candles(
+            self,
+            symbol: str,
+            interval: str,
+            *,
+            count: int,
+            before: str | None,
+            adjusted: bool,
+        ) -> object:
+            calls.append(
+                (
+                    "candles",
+                    {
+                        "symbol": symbol,
+                        "interval": interval,
+                        "count": count,
+                        "before": before,
+                        "adjusted": adjusted,
+                    },
+                )
+            )
+            return {"candles": []}
+
+        def price_limits(self, symbol: str) -> object:
+            calls.append(("price_limits", symbol))
+            return {"symbol": symbol}
+
+        def market_calendar(self, market: str, date: str | None = None) -> object:
+            calls.append(("market_calendar", {"market": market, "date": date}))
+            return {"market": market}
+
+    monkeypatch.setattr("toss_invest_trader.cli.TossInvestClient", MarketDataClient)
+
+    assert main(["quote", "AAPL"]) == 0
+    assert main(["candles", "AAPL", "--interval", "1d", "--count", "20", "--raw"]) == 0
+    assert main(["price-limits", "AAPL"]) == 0
+    assert main(["market-calendar", "US", "--date", "2026-01-02"]) == 0
+
+    capsys.readouterr()
+    assert calls == [
+        ("quote", "AAPL"),
+        (
+            "candles",
+            {
+                "symbol": "AAPL",
+                "interval": "1d",
+                "count": 20,
+                "before": None,
+                "adjusted": False,
+            },
+        ),
+        ("price_limits", "AAPL"),
+        ("market_calendar", {"market": "US", "date": "2026-01-02"}),
+    ]
+
+
+def test_orders_command_passes_filters(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    class OrdersClient:
+        def __init__(self, *_: object, **__: object) -> None:
+            pass
+
+        def __enter__(self) -> OrdersClient:
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            pass
+
+        def orders(self, **kwargs: object) -> object:
+            calls.append(kwargs)
+            return {"orders": []}
+
+    monkeypatch.setattr("toss_invest_trader.cli.TossInvestClient", OrdersClient)
+
+    rc = main(
+        [
+            "orders",
+            "--account",
+            "7",
+            "--status",
+            "CLOSED",
+            "--symbol",
+            "AAPL",
+            "--from-date",
+            "2026-01-01",
+            "--to-date",
+            "2026-01-31",
+            "--cursor",
+            "cursor-1",
+            "--limit",
+            "50",
+        ]
+    )
+
+    assert rc == 0
+    capsys.readouterr()
+    assert calls == [
+        {
+            "account": "7",
+            "status": "CLOSED",
+            "symbol": "AAPL",
+            "from_date": "2026-01-01",
+            "to_date": "2026-01-31",
+            "cursor": "cursor-1",
+            "limit": 50,
+        }
+    ]
 
 
 def test_live_order_requires_live_mode(capsys: pytest.CaptureFixture[str]) -> None:

@@ -13,7 +13,7 @@
 - 인증 정보는 커밋하지 않습니다. 서버에서 `.env.example`을 `.env`로 복사한 뒤 직접 입력하세요.
 - `accountSeq`는 환경변수로 고정하지 않습니다. 계좌가 1개면 API에서 자동 선택하고, 여러 개면 `--account`로 명시합니다.
 - API 정합성은 로컬에서 내려받은 Toss OpenAPI JSON 기준으로 확인합니다. 생성된 JSON은 커밋하지 않습니다.
-- 현재는 전체 OpenAPI wrapper가 아니라 계좌/시세 조회 일부와 주문 생성/취소를 제공하는 작은 client입니다.
+- 현재는 전체 OpenAPI wrapper가 아니라 계좌/시세/주문 조회 일부와 주문 생성/취소를 제공하는 작은 client입니다.
 
 ## Setup
 
@@ -43,6 +43,11 @@ chmod 600 .env
 | `POST` | `/oauth2/token` | internal |
 | `GET` | `/api/v1/accounts` | `accounts` |
 | `GET` | `/api/v1/prices` | `prices` |
+| `GET` | `/api/v1/prices` | `quote` |
+| `GET` | `/api/v1/candles` | `candles` |
+| `GET` | `/api/v1/price-limits` | `price-limits` |
+| `GET` | `/api/v1/market-calendar/KR` | `market-calendar KR` |
+| `GET` | `/api/v1/market-calendar/US` | `market-calendar US` |
 | `GET` | `/api/v1/holdings` | `holdings` |
 | `GET` | `/api/v1/orders` | `orders` |
 | `POST` | `/api/v1/orders` | `order --execute` |
@@ -68,8 +73,13 @@ CLI 동작:
 ```bash
 uv run tosstrader accounts
 uv run tosstrader prices 005930 AAPL
+uv run tosstrader quote AAPL
+uv run tosstrader candles AAPL --interval 1d --count 100
+uv run tosstrader candles AAPL --interval 1m --count 50 --raw
+uv run tosstrader price-limits AAPL
+uv run tosstrader market-calendar US --date 2026-01-02
 uv run tosstrader holdings
-uv run tosstrader orders --status OPEN
+uv run tosstrader orders --status OPEN --from-date 2026-01-01 --to-date 2026-01-31
 uv run tosstrader buying-power --currency KRW
 uv run tosstrader sellable --symbol AAPL
 ```
@@ -119,6 +129,39 @@ uv run tosstrader order \
 ```bash
 uv run tosstrader cancel <order-id>
 uv run tosstrader cancel <order-id> --execute --i-understand-real-order
+```
+
+Dry-run order/cancel output includes operation metadata, target endpoint/method, execution mode,
+preflight checks, and the payload or order ID that would be submitted. Dry-run does not load
+credentials or create an HTTP client.
+
+## Python API
+
+```python
+from toss_invest_trader import OrderDraft, TossInvestClient, load_settings
+
+settings = load_settings()
+with TossInvestClient(settings) as client:
+    quote = client.quote("AAPL")
+    candles = client.candles("AAPL", "1d", count=100)
+    orders = client.orders(
+        account="1",
+        status="OPEN",
+        symbol="AAPL",
+        from_date="2026-01-01",
+        to_date="2026-01-31",
+        limit=50,
+    )
+
+draft = OrderDraft(
+    symbol="AAPL",
+    side="BUY",
+    order_type="LIMIT",
+    quantity="1",
+    price="180.00",
+    client_order_id="manual-aapl-001",
+)
+payload = draft.to_api_payload()
 ```
 
 ## OpenAPI contract check

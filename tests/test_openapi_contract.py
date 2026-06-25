@@ -59,7 +59,7 @@ def test_order_create_contract_matches_local_order_validation() -> None:
     quantity_based, amount_based = schema["oneOf"]
 
     assert quantity_based["required"] == ["symbol", "side", "orderType", "quantity"]
-    assert quantity_based["properties"]["quantity"]["pattern"] == "^\\d+$"
+    assert quantity_based["properties"]["quantity"]["pattern"] == "^\\d+(\\.\\d+)?$"
     assert quantity_based["properties"]["price"]["pattern"] == "^\\d+(\\.\\d+)?$"
     assert quantity_based["properties"]["clientOrderId"]["pattern"] == r"^[a-zA-Z0-9\-_]+$"
     assert quantity_based["properties"]["clientOrderId"]["maxLength"] == 36
@@ -77,6 +77,10 @@ def test_client_supported_endpoints_exist_in_openapi_snapshot() -> None:
         "/oauth2/token": {"post"},
         "/api/v1/accounts": {"get"},
         "/api/v1/prices": {"get"},
+        "/api/v1/candles": {"get"},
+        "/api/v1/price-limits": {"get"},
+        "/api/v1/market-calendar/KR": {"get"},
+        "/api/v1/market-calendar/US": {"get"},
         "/api/v1/holdings": {"get"},
         "/api/v1/orders": {"get", "post"},
         "/api/v1/orders/{orderId}/cancel": {"post"},
@@ -86,3 +90,36 @@ def test_client_supported_endpoints_exist_in_openapi_snapshot() -> None:
     for path, methods in expected.items():
         assert path in paths
         assert methods.issubset(paths[path].keys())
+
+
+def test_market_data_contract_matches_wrappers() -> None:
+    spec = load_spec()
+
+    candles_params = _parameters_by_name(spec, "/api/v1/candles")
+    assert candles_params["symbol"]["required"] is True
+    assert candles_params["interval"]["schema"]["enum"] == ["1m", "1d"]
+    assert candles_params["count"]["schema"]["minimum"] == 1
+    assert candles_params["count"]["schema"]["maximum"] == 200
+
+    orders_params = _parameters_by_name(spec, "/api/v1/orders")
+    for name in ("status", "symbol", "from", "to", "cursor", "limit"):
+        assert name in orders_params
+
+
+def _parameters_by_name(spec: dict, path: str) -> dict:
+    return {
+        parameter["name"]: parameter
+        for parameter in (
+            _resolve_ref(spec, parameter) for parameter in spec["paths"][path]["get"]["parameters"]
+        )
+    }
+
+
+def _resolve_ref(spec: dict, value: dict) -> dict:
+    ref = value.get("$ref")
+    if not ref:
+        return value
+    current = spec
+    for part in ref.removeprefix("#/").split("/"):
+        current = current[part]
+    return current

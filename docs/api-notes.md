@@ -22,10 +22,15 @@ Endpoint groups initially wired in this project:
 
 - `GET /api/v1/accounts`
 - `GET /api/v1/prices?symbols=...`
+- `GET /api/v1/candles?symbol=...&interval=1m|1d&count=...`
+- `GET /api/v1/price-limits?symbol=...`
+- `GET /api/v1/market-calendar/KR?date=YYYY-MM-DD`
+- `GET /api/v1/market-calendar/US?date=YYYY-MM-DD`
 - `GET /api/v1/holdings`
-- `GET /api/v1/orders?status=OPEN|CLOSED`
+- `GET /api/v1/orders?status=OPEN|CLOSED&symbol=...&from=...&to=...&cursor=...&limit=...`
 - `POST /api/v1/orders`
-- `POST /api/v1/orders/{orderId}/cancel`
+  - `quantity`, `price`, and `orderAmount` use decimal-string validation from the live OpenAPI schema (`^\d+(\.\d+)?$`); signs and exponent notation are rejected.
+- `POST /api/v1/orders/{orderId}/cancel` with explicit empty JSON body
 - `GET /api/v1/buying-power?currency=KRW|USD`
 - `GET /api/v1/sellable-quantity?symbol=...`
 
@@ -38,5 +43,6 @@ Trading safety choices in this project:
    - `--execute`
    - `--i-understand-real-order`
 4. `clientOrderId` is required for live orders unless `--generate-client-order-id` is used.
-5. Secrets are intentionally absent. Fill `.env` directly on the server.
-6. OpenAPI JSON is cached locally in `.cache/toss-invest-trader/tossinvest-openapi.json`; update with `uv run python scripts/update_openapi_spec.py` and verify contract tests when upstream changes.
+5. Order/cancel dry-runs emit preflight checks, endpoint/method metadata, and the would-submit payload or order ID without loading credentials or creating HTTP clients.
+6. Secrets are intentionally absent. Fill `.env` directly on the server.
+7. OpenAPI JSON is cached locally in `.cache/toss-invest-trader/tossinvest-openapi.json`; update with `uv run python scripts/update_openapi_spec.py` and verify contract tests when upstream changes.
